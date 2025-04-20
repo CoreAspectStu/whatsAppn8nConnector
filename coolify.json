@@ -1,14 +1,14 @@
 {
   "services": {
-    "whatsapp-ai-bot": {
+    "whatsapp-n8n-connector": {
       "type": "application",
       "image": {
         "type": "dockerfile",
         "path": "Dockerfile"
       },
       "port": {
-        "internal": 3000,
-        "external": 3000,
+        "internal": 3030,
+        "external": 3030,
         "protocol": "http"
       },
       "volumes": [
@@ -27,50 +27,46 @@
       ],
       "environment": [
         {
-          "name": "NODE_ENV",
-          "value": "production"
+          "name": "PORT",
+          "value": "3030"
         },
         {
-          "name": "PORT",
-          "value": "3000"
+          "name": "NODE_ENV",
+          "value": "production"
         },
         {
           "name": "LOG_LEVEL",
           "value": "info"
         },
         {
-          "name": "CLIENT_ID",
-          "value": "whatsapp-ai-bot"
+          "name": "API_KEY",
+          "value": "REPLACE_WITH_YOUR_API_KEY"
         },
         {
-          "name": "ALLOWED_USERS",
-          "value": "REPLACE_WITH_YOUR_PHONE_NUMBERS"
+          "name": "ADMIN_API_KEY",
+          "value": "REPLACE_WITH_YOUR_ADMIN_API_KEY"
         },
         {
-          "name": "N8N_BASE_URL",
-          "value": "http://REPLACE_WITH_YOUR_N8N_URL:5678"
+          "name": "ENCRYPTION_KEY",
+          "value": "REPLACE_WITH_32_CHAR_ENCRYPTION_KEY"
         },
         {
-          "name": "N8N_WEBHOOK_PATH",
-          "value": "webhook/whatsapp-ai-bot"
+          "name": "JWT_SECRET",
+          "value": "REPLACE_WITH_YOUR_JWT_SECRET"
         },
         {
-          "name": "AI_PROVIDER",
-          "value": "openai"
+          "name": "CORS_ORIGIN",
+          "value": "*"
         },
         {
-          "name": "OPENAI_API_KEY",
-          "value": "REPLACE_WITH_YOUR_OPENAI_API_KEY"
-        },
-        {
-          "name": "OPENAI_MODEL",
-          "value": "gpt-4-turbo"
+          "name": "RESTART_ON_CRASH",
+          "value": "true"
         }
       ],
       "restart": "always",
       "healthCheck": {
         "path": "/health",
-        "port": 3000,
+        "port": 3030,
         "interval": 30,
         "timeout": 5,
         "retries": 3

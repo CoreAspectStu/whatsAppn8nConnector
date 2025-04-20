@@ -1,26 +1,11 @@
 // src/services/n8nService.js
 const axios = require('axios');
 const logger = require('../utils/logger');
-
-// Load configuration from environment variables
-const N8N_BASE_URL = process.env.N8N_BASE_URL || 'http://localhost:5678';
-const N8N_API_KEY = process.env.N8N_API_KEY || '';
-const N8N_WEBHOOK_PATH = process.env.N8N_WEBHOOK_PATH || 'webhook/whatsapp-ai-bot';
-const N8N_TIMEOUT = parseInt(process.env.N8N_TIMEOUT || '15000', 10);
-
-// Create axios instance with default configuration
-const n8nClient = axios.create({
-  baseURL: N8N_BASE_URL,
-  timeout: N8N_TIMEOUT,
-  headers: {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json',
-    ...(N8N_API_KEY ? { 'X-N8N-Api-Key': N8N_API_KEY } : {})
-  }
-});
+const { getInstanceConfig } = require('../models/instance');
 
 /**
  * Send a message to n8n for AI processing
+ * @param {string} instanceId - The instance ID
  * @param {Object} data - The message data
  * @param {string} data.message - The message content
  * @param {Object} data.sender - Information about the sender
@@ -28,12 +13,31 @@ const n8nClient = axios.create({
  * @param {string} data.timestamp - The message timestamp
  * @returns {Promise<Object>} - The AI response
  */
-async function sendMessageToN8n(data) {
+async function sendMessageToN8n(instanceId, data) {
   try {
-    logger.debug(`Sending message to n8n: ${data.message.substring(0, 50)}...`);
+    logger.debug(`Sending message to n8n for instance ${instanceId}: ${data.message.substring(0, 50)}...`);
+    
+    // Get instance configuration
+    const instanceConfig = await getInstanceConfig(instanceId);
+    if (!instanceConfig || !instanceConfig.n8nConfig) {
+      throw new Error(`No n8n configuration found for instance ${instanceId}`);
+    }
+    
+    const { baseUrl, apiKey, webhookPath } = instanceConfig.n8nConfig;
+    
+    // Create n8n client for this instance
+    const n8nClient = axios.create({
+      baseURL: baseUrl,
+      timeout: parseInt(instanceConfig.n8nConfig.timeout || '15000', 10),
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        ...(apiKey ? { 'X-N8N-Api-Key': apiKey } : {})
+      }
+    });
     
     // Ensure we have a valid webhook URL
-    const webhookUrl = `${N8N_BASE_URL}/${N8N_WEBHOOK_PATH}`.replace(/([^:]\/)\/+/g, '$1');
+    const webhookUrl = `${baseUrl}/${webhookPath}`.replace(/([^:]\/)\/+/g, '$1');
     
     // Send the request to n8n
     const response = await n8nClient.post(webhookUrl, data);
@@ -43,10 +47,10 @@ async function sendMessageToN8n(data) {
       throw new Error('Empty response from n8n');
     }
     
-    logger.debug(`Received response from n8n: ${JSON.stringify(response.data).substring(0, 100)}...`);
+    logger.debug(`Received response from n8n for instance ${instanceId}: ${JSON.stringify(response.data).substring(0, 100)}...`);
     return response.data;
   } catch (error) {
-    logger.error('Error sending message to n8n:', error.message);
+    logger.error(`Error sending message to n8n for instance ${instanceId}:`, error.message);
     if (error.response) {
       logger.error(`n8n response status: ${error.response.status}`);
       logger.error(`n8n response data: ${JSON.stringify(error.response.data)}`);
@@ -56,22 +60,40 @@ async function sendMessageToN8n(data) {
 }
 
 /**
- * Check n8n health status
+ * Check n8n health status for a specific instance
+ * @param {string} instanceId - The instance ID
  * @returns {Promise<Object>} - Health check result
  */
-async function checkN8nHealth() {
+async function checkN8nHealth(instanceId) {
   try {
-    // You can create a dedicated health check workflow in n8n
-    const webhookUrl = `${N8N_BASE_URL}/webhook/whatsapp-bot-health`;
-    const response = await n8nClient.get(webhookUrl);
+    // Get instance configuration
+    const instanceConfig = await getInstanceConfig(instanceId);
+    if (!instanceConfig || !instanceConfig.n8nConfig) {
+      throw new Error(`No n8n configuration found for instance ${instanceId}`);
+    }
+    
+    const { baseUrl, apiKey } = instanceConfig.n8nConfig;
+    
+    // Create n8n client for this instance
+    const n8nClient = axios.create({
+      baseURL: baseUrl,
+      timeout: 5000,
+      headers: {
+        'Accept': 'application/json',
+        ...(apiKey ? { 'X-N8N-Api-Key': apiKey } : {})
+      }
+    });
+    
+    // Check if n8n is accessible
+    const response = await n8nClient.get('/');
     
     return {
       status: 'ok',
-      message: response.data.message || 'n8n is healthy',
+      message: 'n8n is accessible',
       timestamp: new Date().toISOString()
     };
   } catch (error) {
-    logger.error('n8n health check failed:', error.message);
+    logger.error(`n8n health check failed for instance ${instanceId}:`, error.message);
     return {
       status: 'error',
       message: `n8n health check failed: ${error.message}`,
@@ -82,65 +104,56 @@ async function checkN8nHealth() {
 
 /**
  * Execute a specific AI model directly (fallback if agent isn't available)
+ * @param {string} instanceId - The instance ID
  * @param {string} model - The model to use (e.g., 'gpt-4')
  * @param {string} prompt - The prompt to send
  * @param {Object} options - Additional options
  * @returns {Promise<Object>} - The model's response
  */
-async function executeAiModel(model, prompt, options = {}) {
+async function executeAiModel(instanceId, model, prompt, options = {}) {
   try {
-    // This endpoint would be a custom n8n workflow designed to call an AI model directly
-    const directAiUrl = `${N8N_BASE_URL}/webhook/direct-ai-call`;
+    // Get instance configuration
+    const instanceConfig = await getInstanceConfig(instanceId);
+    if (!instanceConfig || !instanceConfig.n8nConfig) {
+      throw new Error(`No n8n configuration found for instance ${instanceId}`);
+    }
     
-    const response = await n8nClient.post(directAiUrl, {
+    const { baseUrl, apiKey, fallbackWebhookPath } = instanceConfig.n8nConfig;
+    
+    // If no fallback webhook path is defined, throw an error
+    if (!fallbackWebhookPath) {
+      throw new Error('No fallback webhook path defined for this instance');
+    }
+    
+    // Create n8n client for this instance
+    const n8nClient = axios.create({
+      baseURL: baseUrl,
+      timeout: parseInt(instanceConfig.n8nConfig.timeout || '15000', 10),
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        ...(apiKey ? { 'X-N8N-Api-Key': apiKey } : {})
+      }
+    });
+    
+    // Send the request to the fallback webhook
+    const fallbackUrl = `${baseUrl}/${fallbackWebhookPath}`.replace(/([^:]\/)\/+/g, '$1');
+    const response = await n8nClient.post(fallbackUrl, {
       model,
       prompt,
-      options
+      options,
+      instanceId
     });
     
     return response.data;
   } catch (error) {
-    logger.error(`Error executing AI model ${model}:`, error.message);
+    logger.error(`Error executing AI model for instance ${instanceId}:`, error.message);
     throw new Error(`Failed to execute AI model: ${error.message}`);
-  }
-}
-
-/**
- * Get the status of a running n8n workflow execution
- * @param {string} executionId - The execution ID
- * @returns {Promise<Object>} - The execution status
- */
-async function getWorkflowExecutionStatus(executionId) {
-  try {
-    // This requires n8n API access with appropriate permissions
-    const response = await n8nClient.get(`/executions/${executionId}`);
-    return response.data;
-  } catch (error) {
-    logger.error(`Error getting execution status for ${executionId}:`, error.message);
-    throw new Error(`Failed to get execution status: ${error.message}`);
-  }
-}
-
-/**
- * Cancel a running n8n workflow execution
- * @param {string} executionId - The execution ID
- * @returns {Promise<boolean>} - Whether the cancellation was successful
- */
-async function cancelWorkflowExecution(executionId) {
-  try {
-    // This requires n8n API access with appropriate permissions
-    await n8nClient.post(`/executions/${executionId}/cancel`);
-    return true;
-  } catch (error) {
-    logger.error(`Error cancelling execution ${executionId}:`, error.message);
-    return false;
   }
 }
 
 module.exports = {
   sendMessageToN8n,
   checkN8nHealth,
-  executeAiModel,
-  getWorkflowExecutionStatus,
-  cancelWorkflowExecution
+  executeAiModel
 };

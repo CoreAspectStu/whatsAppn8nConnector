@@ -3,9 +3,9 @@ const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
-const { webhookHandler } = require('./controllers/webhookHandler');
 const logger = require('./utils/logger');
-const { validateApiKey } = require('./middleware/auth');
+const { registerInstanceRoutes } = require('./controllers/instanceController');
+const { registerWebhookRoutes } = require('./controllers/webhookHandler');
 
 // Create Express app
 const app = express();
@@ -16,13 +16,13 @@ app.use(helmet());
 // Enable CORS with configuration
 app.use(cors({
   origin: process.env.CORS_ORIGIN || '*',
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-Admin-Key'],
 }));
 
 // Request logging
 app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.url}`);
+  logger.info(`${req.method} ${req.path}`);
   next();
 });
 
@@ -41,19 +41,27 @@ app.use('/api', apiLimiter);
 
 // Health check endpoint (useful for container orchestration)
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.status(200).json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    version: process.env.npm_package_version || '1.0.0',
+    environment: process.env.NODE_ENV || 'development'
+  });
 });
 
 // Version info endpoint
 app.get('/version', (req, res) => {
   res.status(200).json({
     version: process.env.npm_package_version || '1.0.0',
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    nodeVersion: process.version,
+    uptime: process.uptime()
   });
 });
 
-// API routes with authentication
-app.post('/api/webhook', validateApiKey, webhookHandler);
+// Register routes from controllers
+registerInstanceRoutes(app);
+registerWebhookRoutes(app);
 
 // 404 handler
 app.use((req, res) => {

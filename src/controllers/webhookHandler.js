@@ -1,6 +1,7 @@
 // src/controllers/webhookHandler.js
 const logger = require('../utils/logger');
-const { sendMessage } = require('../services/whatsappService');
+const { getInstanceConfig } = require('../models/instance');
+const { getClientInstance } = require('../services/whatsappService');
 const { sanitizeInput } = require('../utils/security');
 
 /**
@@ -11,7 +12,25 @@ const { sanitizeInput } = require('../utils/security');
  */
 async function webhookHandler(req, res) {
   try {
-    logger.info('Received webhook request');
+    const instanceId = req.params.instanceId;
+    logger.info(`Received webhook request for instance ${instanceId}`);
+
+    // Validate instance ID
+    if (!instanceId) {
+      return res.status(400).json({ error: 'Missing instance ID' });
+    }
+
+    // Get instance configuration
+    const instanceConfig = await getInstanceConfig(instanceId);
+    if (!instanceConfig) {
+      return res.status(404).json({ error: 'Instance not found' });
+    }
+
+    // Get WhatsApp client instance
+    const client = getClientInstance(instanceId);
+    if (!client) {
+      return res.status(503).json({ error: 'WhatsApp client not initialized for this instance' });
+    }
 
     // Validate request body
     if (!req.body || typeof req.body !== 'object') {
@@ -39,15 +58,30 @@ async function webhookHandler(req, res) {
     }
 
     // Send message to WhatsApp
-    logger.info(`Sending webhook message to ${sanitizedTo}`);
-    const result = await sendMessage(sanitizedTo, sanitizedMessage);
-
-    // Return success response
-    return res.status(200).json({
-      success: true,
-      messageId: result.id,
-      timestamp: new Date().toISOString()
-    });
+    logger.info(`Sending webhook message to ${sanitizedTo} from instance ${instanceId}`);
+    
+    try {
+      // Format the phone number
+      const formattedNumber = sanitizedTo.includes('@c.us') ? sanitizedTo : `${sanitizedTo}@c.us`;
+      
+      // Send the message
+      const result = await client.sendMessage(formattedNumber, sanitizedMessage);
+      
+      // Return success response
+      return res.status(200).json({
+        success: true,
+        messageId: result.id,
+        instanceId: instanceId,
+        timestamp: new Date().toISOString()
+      });
+    } catch (sendError) {
+      logger.error(`Failed to send message to ${sanitizedTo} from instance ${instanceId}:`, sendError);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to send message',
+        message: sendError.message
+      });
+    }
   } catch (error) {
     logger.error('Error processing webhook:', error);
     return res.status(500).json({
@@ -71,6 +105,18 @@ function isValidPhoneNumber(phoneNumber) {
   return /^\d{10,15}$/.test(number);
 }
 
+/**
+ * Register webhook routes with Express app
+ * @param {Object} app - Express app
+ */
+function registerWebhookRoutes(app) {
+  const { validateApiKey } = require('../middleware/auth');
+  
+  // Main webhook route for sending messages
+  app.post('/api/webhook/:instanceId', validateApiKey, webhookHandler);
+}
+
 module.exports = {
-  webhookHandler
+  webhookHandler,
+  registerWebhookRoutes
 };

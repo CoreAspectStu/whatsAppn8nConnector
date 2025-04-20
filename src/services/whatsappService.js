@@ -5,28 +5,30 @@ const fs = require('fs');
 const path = require('path');
 const { handleIncomingMessage } = require('../controllers/messageHandler');
 const logger = require('../utils/logger');
-const config = require('../config');
+const { updateInstanceStatus } = require('../models/instance');
 
-// Global client instance
-let whatsappClient = null;
+// Global client instances
+const clientInstances = {};
 
 /**
- * Initialize the WhatsApp client
- * @returns {Promise<void>}
+ * Initialize the WhatsApp client for a specific instance
+ * @param {string} instanceId - The instance ID
+ * @param {Object} config - Instance configuration
+ * @returns {Promise<Object>} - The WhatsApp client instance
  */
-async function initializeWhatsApp() {
+async function initializeWhatsAppInstance(instanceId, config) {
   try {
-    // Create sessions directory if it doesn't exist
-    const sessionDir = path.join(process.cwd(), 'sessions');
+    // Create sessions directory for this instance if it doesn't exist
+    const sessionDir = path.join(process.cwd(), 'sessions', instanceId);
     if (!fs.existsSync(sessionDir)) {
       fs.mkdirSync(sessionDir, { recursive: true });
     }
 
-    // Initialize WhatsApp client with better configuration
-    whatsappClient = new Client({
+    // Initialize WhatsApp client with configuration
+    clientInstances[instanceId] = new Client({
       authStrategy: new LocalAuth({
         dataPath: sessionDir,
-        clientId: process.env.CLIENT_ID || 'whatsapp-ai-bot'
+        clientId: instanceId
       }),
       puppeteer: {
         headless: true,
@@ -48,81 +50,143 @@ async function initializeWhatsApp() {
       webVersion: '2.2340.0'
     });
 
-    // Handle QR code for authentication
-    whatsappClient.on('qr', (qr) => {
-      logger.info('QR code received. Scan with your WhatsApp phone.');
-      // Generate QR in terminal
-      qrcode.generate(qr, { small: true });
-      
-      // Also save QR code to a file for web access if needed
-      const qrPath = path.join(process.cwd(), 'qrcode.txt');
-      fs.writeFileSync(qrPath, qr);
-      logger.info(`QR code also saved to ${qrPath}`);
-    });
-
-    // Handle authentication state
-    whatsappClient.on('authenticated', () => {
-      logger.info('WhatsApp client authenticated successfully');
-    });
-
-    // Handle authentication failures
-    whatsappClient.on('auth_failure', (error) => {
-      logger.error('WhatsApp authentication failed:', error);
-    });
-
-    // Handle client ready state
-    whatsappClient.on('ready', () => {
-      logger.info('WhatsApp client is ready');
-      // Clean up QR code file if it exists
-      const qrPath = path.join(process.cwd(), 'qrcode.txt');
-      if (fs.existsSync(qrPath)) {
-        fs.unlinkSync(qrPath);
-      }
-    });
-
-    // Handle disconnection
-    whatsappClient.on('disconnected', (reason) => {
-      logger.warn('WhatsApp client disconnected:', reason);
-      // Attempt to reconnect after a delay
-      setTimeout(() => {
-        logger.info('Attempting to reconnect WhatsApp client...');
-        whatsappClient.initialize();
-      }, 5000);
-    });
-
-    // Handle incoming messages
-    whatsappClient.on('message_create', async (message) => {
-      try {
-        // Log message received (with sensitive data redacted)
-        const redactedBody = message.body ? message.body.substring(0, 20) + (message.body.length > 20 ? '...' : '') : '';
-        logger.info(`Message received from ${message.from}: ${redactedBody}`);
-        
-        // Process the message
-        await handleIncomingMessage(message, whatsappClient);
-      } catch (error) {
-        logger.error('Error handling incoming message:', error);
-      }
-    });
-
-    // Initialize the client
-    await whatsappClient.initialize();
+    // Set up event handlers
+    setupEventHandlers(instanceId, clientInstances[instanceId], config);
     
-    return whatsappClient;
+    // Initialize the client
+    await clientInstances[instanceId].initialize();
+    
+    logger.info(`WhatsApp client for instance ${instanceId} initialized`);
+    return clientInstances[instanceId];
   } catch (error) {
-    logger.error('Failed to initialize WhatsApp client:', error);
+    logger.error(`Failed to initialize WhatsApp client for instance ${instanceId}:`, error);
     throw error;
   }
 }
 
 /**
- * Send a message to a WhatsApp chat
+ * Set up event handlers for a WhatsApp client instance
+ * @param {string} instanceId - The instance ID
+ * @param {Object} client - The WhatsApp client instance
+ * @param {Object} config - Instance configuration
+ */
+function setupEventHandlers(instanceId, client, config) {
+  // Handle QR code for authentication
+  client.on('qr', (qr) => {
+    logger.info(`QR code received for instance ${instanceId}`);
+    
+    // Generate QR in terminal for debug purposes
+    qrcode.generate(qr, { small: true });
+    
+    // Save QR code to a file for web access
+    const qrPath = path.join(process.cwd(), 'sessions', instanceId, 'qrcode.txt');
+    fs.writeFileSync(qrPath, qr);
+    logger.info(`QR code saved to ${qrPath} for instance ${instanceId}`);
+    
+    // Update instance status
+    updateInstanceStatus(instanceId, 'WAITING_FOR_QR_SCAN');
+  });
+
+  // Handle authentication state
+  client.on('authenticated', () => {
+    logger.info(`WhatsApp client for instance ${instanceId} authenticated successfully`);
+    updateInstanceStatus(instanceId, 'AUTHENTICATED');
+  });
+
+  // Handle authentication failures
+  client.on('auth_failure', (error) => {
+    logger.error(`WhatsApp authentication failed for instance ${instanceId}:`, error);
+    updateInstanceStatus(instanceId, 'AUTH_FAILURE');
+  });
+
+  // Handle client ready state
+  client.on('ready', () => {
+    logger.info(`WhatsApp client for instance ${instanceId} is ready`);
+    
+    // Clean up QR code file if it exists
+    const qrPath = path.join(process.cwd(), 'sessions', instanceId, 'qrcode.txt');
+    if (fs.existsSync(qrPath)) {
+      fs.unlinkSync(qrPath);
+    }
+    
+    updateInstanceStatus(instanceId, 'CONNECTED');
+  });
+
+  // Handle disconnection
+  client.on('disconnected', (reason) => {
+    logger.warn(`WhatsApp client for instance ${instanceId} disconnected:`, reason);
+    updateInstanceStatus(instanceId, 'DISCONNECTED');
+    
+    // Attempt to reconnect after a delay
+    setTimeout(() => {
+      logger.info(`Attempting to reconnect WhatsApp client for instance ${instanceId}...`);
+      client.initialize();
+    }, 5000);
+  });
+
+  // Handle incoming messages
+  client.on('message_create', async (message) => {
+    try {
+      // Log message received (with sensitive data redacted)
+      const redactedBody = message.body ? message.body.substring(0, 20) + (message.body.length > 20 ? '...' : '') : '';
+      logger.info(`Message received for instance ${instanceId} from ${message.from}: ${redactedBody}`);
+      
+      // Process the message with instance context
+      await handleIncomingMessage(message, client, instanceId, config);
+    } catch (error) {
+      logger.error(`Error handling incoming message for instance ${instanceId}:`, error);
+    }
+  });
+}
+
+/**
+ * Get a specific WhatsApp client instance
+ * @param {string} instanceId - The instance ID
+ * @returns {Object|null} - The WhatsApp client instance or null if not found
+ */
+function getClientInstance(instanceId) {
+  return clientInstances[instanceId] || null;
+}
+
+/**
+ * Check if a client instance exists and is initialized
+ * @param {string} instanceId - The instance ID
+ * @returns {boolean} - Whether the client instance exists and is initialized
+ */
+function isClientInitialized(instanceId) {
+  return !!clientInstances[instanceId];
+}
+
+/**
+ * Get the state of a client instance
+ * @param {string} instanceId - The instance ID
+ * @returns {Promise<string>} - The client state
+ */
+async function getClientState(instanceId) {
+  try {
+    const client = getClientInstance(instanceId);
+    if (!client) {
+      return 'NOT_INITIALIZED';
+    }
+    
+    return await client.getState();
+  } catch (error) {
+    logger.error(`Error getting state for instance ${instanceId}:`, error);
+    return 'ERROR';
+  }
+}
+
+/**
+ * Send a message from a specific instance
+ * @param {string} instanceId - The instance ID
  * @param {string} to - The recipient's phone number with country code (@c.us format)
  * @param {string} message - The message to send
  * @returns {Promise<any>} - The sent message object
  */
-async function sendMessage(to, message) {
-  if (!whatsappClient) {
-    throw new Error('WhatsApp client not initialized');
+async function sendMessage(instanceId, to, message) {
+  const client = getClientInstance(instanceId);
+  if (!client) {
+    throw new Error(`WhatsApp client for instance ${instanceId} not initialized`);
   }
   
   try {
@@ -132,106 +196,53 @@ async function sendMessage(to, message) {
     }
     
     // Send the message
-    const response = await whatsappClient.sendMessage(to, message);
-    logger.info(`Message sent to ${to}`);
+    const response = await client.sendMessage(to, message);
+    logger.info(`Message sent from instance ${instanceId} to ${to}`);
     return response;
   } catch (error) {
-    logger.error(`Failed to send message to ${to}:`, error);
+    logger.error(`Failed to send message from instance ${instanceId} to ${to}:`, error);
     throw error;
   }
 }
 
 /**
- * Send a media message to a WhatsApp chat
- * @param {string} to - The recipient's phone number
- * @param {Buffer|string} media - The media content (buffer or base64)
- * @param {string} filename - The filename
- * @param {string} caption - Optional caption
- * @returns {Promise<any>} - The sent message object
+ * List all active instances
+ * @returns {Array} - Array of active instance IDs
  */
-async function sendMediaMessage(to, media, filename, caption = '') {
-  if (!whatsappClient) {
-    throw new Error('WhatsApp client not initialized');
-  }
-  
+function listActiveInstances() {
+  return Object.keys(clientInstances);
+}
+
+/**
+ * Destroy a client instance
+ * @param {string} instanceId - The instance ID
+ * @returns {Promise<boolean>} - Whether the destroy was successful
+ */
+async function destroyClientInstance(instanceId) {
   try {
-    // Create MessageMedia object
-    const messageMedia = new MessageMedia(
-      getContentType(filename),
-      typeof media === 'string' ? media : media.toString('base64'),
-      filename
-    );
+    const client = getClientInstance(instanceId);
+    if (client) {
+      // Attempt to log out and destroy the client
+      await client.destroy();
+      delete clientInstances[instanceId];
+      logger.info(`Client instance ${instanceId} destroyed`);
+    }
     
-    // Send the media message
-    const response = await whatsappClient.sendMessage(to, messageMedia, { caption });
-    logger.info(`Media message sent to ${to}`);
-    return response;
+    // Update instance status
+    await updateInstanceStatus(instanceId, 'DESTROYED');
+    return true;
   } catch (error) {
-    logger.error(`Failed to send media message to ${to}:`, error);
-    throw error;
+    logger.error(`Error destroying client instance ${instanceId}:`, error);
+    return false;
   }
-}
-
-/**
- * Get content type based on file extension
- * @param {string} filename - The filename
- * @returns {string} - The MIME type
- */
-function getContentType(filename) {
-  const ext = path.extname(filename).toLowerCase();
-  const mimeTypes = {
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif',
-    '.pdf': 'application/pdf',
-    '.mp3': 'audio/mpeg',
-    '.mp4': 'video/mp4',
-    '.webp': 'image/webp'
-  };
-  
-  return mimeTypes[ext] || 'application/octet-stream';
-}
-
-/**
- * Check if a number exists on WhatsApp
- * @param {string} number - The phone number to check
- * @returns {Promise<boolean>} - Whether the number exists
- */
-async function checkNumberExists(number) {
-  if (!whatsappClient) {
-    throw new Error('WhatsApp client not initialized');
-  }
-  
-  try {
-    // Format the number
-    const formattedNumber = number.includes('@c.us') ? number : `${number}@c.us`;
-    
-    // Check if the number exists
-    const exists = await whatsappClient.isRegisteredUser(formattedNumber);
-    return exists;
-  } catch (error) {
-    logger.error(`Failed to check if number exists ${number}:`, error);
-    throw error;
-  }
-}
-
-/**
- * Get the current connection state
- * @returns {string} - The connection state
- */
-function getConnectionState() {
-  if (!whatsappClient) {
-    return 'DISCONNECTED';
-  }
-  
-  return whatsappClient.getState();
 }
 
 module.exports = {
-  initializeWhatsApp,
+  initializeWhatsAppInstance,
+  getClientInstance,
+  isClientInitialized,
+  getClientState,
   sendMessage,
-  sendMediaMessage,
-  checkNumberExists,
-  getConnectionState
+  listActiveInstances,
+  destroyClientInstance
 };

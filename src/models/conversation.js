@@ -5,7 +5,7 @@ const logger = require('../utils/logger');
 const { encrypt, decrypt } = require('../utils/security');
 
 // Directory to store conversation data
-const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_DIR = path.join(process.cwd(), 'data', 'conversations');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -14,20 +14,20 @@ if (!fs.existsSync(DATA_DIR)) {
 
 /**
  * Get conversation history for a user
- * @param {string} userId - The user ID
+ * @param {string} conversationId - The conversation ID (instanceId-userId or instanceId-groupId)
  * @returns {Promise<Object>} - The conversation object
  */
-async function getConversation(userId) {
+async function getConversation(conversationId) {
   try {
-    // Sanitize user ID for use in filename
-    const safeUserId = userId.replace(/[^a-zA-Z0-9]/g, '_');
-    const filePath = path.join(DATA_DIR, `${safeUserId}_conversation.json`);
+    // Sanitize conversation ID for use in filename
+    const safeConversationId = conversationId.replace(/[^a-zA-Z0-9-_]/g, '_');
+    const filePath = path.join(DATA_DIR, `${safeConversationId}.json`);
     
     // Check if conversation file exists
     if (!fs.existsSync(filePath)) {
       // Return empty conversation if file doesn't exist
       return {
-        userId,
+        conversationId,
         messages: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
@@ -47,11 +47,11 @@ async function getConversation(userId) {
     // Return the conversation
     return conversation;
   } catch (error) {
-    logger.error(`Error getting conversation for ${userId}:`, error);
+    logger.error(`Error getting conversation for ${conversationId}:`, error);
     
     // Return empty conversation on error
     return {
-      userId,
+      conversationId,
       messages: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -60,16 +60,16 @@ async function getConversation(userId) {
 }
 
 /**
- * Save conversation history for a user
- * @param {string} userId - The user ID
+ * Save conversation history
+ * @param {string} conversationId - The conversation ID (instanceId-userId or instanceId-groupId)
  * @param {Object} conversation - The conversation object to save
  * @returns {Promise<boolean>} - Whether the save was successful
  */
-async function saveConversation(userId, conversation) {
+async function saveConversation(conversationId, conversation) {
   try {
-    // Sanitize user ID for use in filename
-    const safeUserId = userId.replace(/[^a-zA-Z0-9]/g, '_');
-    const filePath = path.join(DATA_DIR, `${safeUserId}_conversation.json`);
+    // Sanitize conversation ID for use in filename
+    const safeConversationId = conversationId.replace(/[^a-zA-Z0-9-_]/g, '_');
+    const filePath = path.join(DATA_DIR, `${safeConversationId}.json`);
     
     // Update the timestamp
     conversation.updatedAt = new Date().toISOString();
@@ -87,21 +87,21 @@ async function saveConversation(userId, conversation) {
     
     return true;
   } catch (error) {
-    logger.error(`Error saving conversation for ${userId}:`, error);
+    logger.error(`Error saving conversation for ${conversationId}:`, error);
     return false;
   }
 }
 
 /**
- * Clear conversation history for a user
- * @param {string} userId - The user ID
+ * Clear conversation history
+ * @param {string} conversationId - The conversation ID (instanceId-userId or instanceId-groupId)
  * @returns {Promise<boolean>} - Whether the clear was successful
  */
-async function clearConversation(userId) {
+async function clearConversation(conversationId) {
   try {
-    // Sanitize user ID for use in filename
-    const safeUserId = userId.replace(/[^a-zA-Z0-9]/g, '_');
-    const filePath = path.join(DATA_DIR, `${safeUserId}_conversation.json`);
+    // Sanitize conversation ID for use in filename
+    const safeConversationId = conversationId.replace(/[^a-zA-Z0-9-_]/g, '_');
+    const filePath = path.join(DATA_DIR, `${safeConversationId}.json`);
     
     // Check if conversation file exists
     if (fs.existsSync(filePath)) {
@@ -111,8 +111,36 @@ async function clearConversation(userId) {
     
     return true;
   } catch (error) {
-    logger.error(`Error clearing conversation for ${userId}:`, error);
+    logger.error(`Error clearing conversation for ${conversationId}:`, error);
     return false;
+  }
+}
+
+/**
+ * Delete all conversations for an instance
+ * @param {string} instanceId - The instance ID
+ * @returns {Promise<number>} - The number of deleted conversations
+ */
+async function deleteInstanceConversations(instanceId) {
+  try {
+    // Get all conversation files for this instance
+    const files = fs.readdirSync(DATA_DIR).filter(file => 
+      file.startsWith(`${instanceId}-`) && file.endsWith('.json')
+    );
+    
+    // Delete each file
+    let deletedCount = 0;
+    for (const file of files) {
+      const filePath = path.join(DATA_DIR, file);
+      fs.unlinkSync(filePath);
+      deletedCount++;
+    }
+    
+    logger.info(`Deleted ${deletedCount} conversations for instance ${instanceId}`);
+    return deletedCount;
+  } catch (error) {
+    logger.error(`Error deleting conversations for instance ${instanceId}:`, error);
+    return 0;
   }
 }
 
@@ -124,7 +152,7 @@ async function clearConversation(userId) {
 async function deleteOldConversations(days = 30) {
   try {
     // Get all conversation files
-    const files = fs.readdirSync(DATA_DIR).filter(file => file.endsWith('_conversation.json'));
+    const files = fs.readdirSync(DATA_DIR).filter(file => file.endsWith('.json'));
     
     // Calculate cutoff date
     const cutoffDate = new Date();
@@ -156,5 +184,6 @@ module.exports = {
   getConversation,
   saveConversation,
   clearConversation,
+  deleteInstanceConversations,
   deleteOldConversations
 };

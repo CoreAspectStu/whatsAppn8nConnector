@@ -1,26 +1,18 @@
 # WhatsApp n8n Connector
 
-A robust WhatsApp AI chatbot with n8n integration, AI Agent capabilities, and enhanced security features for deployment on Oracle Cloud via Coolify.
+A multi-instance WhatsApp gateway that connects with n8n for AI-powered responses. Deploy on Oracle Cloud via Coolify for a robust, scalable WhatsApp automation solution.
 
 ## 🌟 Features
 
-- **n8n-Powered AI Processing**: Leverages n8n's AI Agent capabilities for advanced tool calling
-- **Multi-Model Support**: Works with OpenAI, Anthropic, or other LLM providers via n8n
-- **Enhanced Security**: Proper authentication, encryption, and access control
-- **Conversation Memory**: Persistent conversation history with context window management
-- **Web Search Capabilities**: Can search the web to answer questions in real-time
-- **Calculator Tool Integration**: Handles mathematical calculations directly
-- **Group Chat Support**: Works in both individual and group conversations
+- **Multi-Instance Support**: Manage multiple WhatsApp connections from a single server
+- **n8n Integration**: Each instance can connect to different n8n workflows
+- **Dynamic Webhook URLs**: Unique endpoint for each WhatsApp instance
+- **Admin API**: Manage instances through a comprehensive API
+- **Enhanced Security**: API key authentication and encryption capabilities
+- **Conversation Memory**: Instance-specific conversation history for context
+- **Group Chat Support**: Intelligent handling of group messages
 - **Containerized**: Easy deployment with Docker and Coolify
-- **Analytics**: Tracks usage patterns and performance metrics
-
-## 📋 Prerequisites
-
-- Node.js 18+ and npm
-- n8n instance running on Oracle Cloud
-- Coolify for deployment
-- Docker (for local development and testing)
-- OpenAI API key configured in n8n (not needed in the bot itself)
+- **API-First Design**: Perfect for integration with custom frontends
 
 ## 🚀 Quick Start
 
@@ -43,24 +35,39 @@ A robust WhatsApp AI chatbot with n8n integration, AI Agent capabilities, and en
    npm install
    ```
 
-### n8n Setup
+4. Run the server:
+   ```bash
+   npm start
+   ```
 
-1. Import the provided workflows from the `n8n/workflows` directory into your n8n instance:
-   - `advanced_ai_whatsapp_bot.json` - Main AI agent workflow
-   - `bot_analytics.json` - Analytics tracking workflow
+### Creating a WhatsApp Instance
 
-2. Configure the necessary credentials in n8n:
-   - OpenAI API for the AI model
-   - Other API credentials as needed (Google for search, etc.)
+1. Create a new instance:
+   ```bash
+   curl -X POST http://localhost:3030/api/admin/instances \
+     -H "Content-Type: application/json" \
+     -H "X-Admin-Key: your-admin-key" \
+     -d '{
+       "instanceId": "instance1",
+       "name": "My WhatsApp Bot",
+       "n8nConfig": {
+         "baseUrl": "http://your-n8n-server:5678",
+         "webhookPath": "webhook/whatsapp-ai-bot",
+         "apiKey": "your-n8n-api-key",
+         "timeout": 15000
+       },
+       "allowedUsers": ["1234567890", "0987654321"],
+       "allowedGroups": ["*"]
+     }'
+   ```
 
-3. Activate the workflows in n8n
+2. Get the QR code to authenticate WhatsApp:
+   ```bash
+   curl http://localhost:3030/api/instances/instance1/qr \
+     -H "X-API-Key: your-api-key"
+   ```
 
-### Local Development
-
-Run the application in development mode:
-```bash
-npm run dev
-```
+3. Scan the QR code with WhatsApp on your phone
 
 ### Docker Deployment
 
@@ -69,62 +76,69 @@ Build and run with Docker:
 docker-compose up -d
 ```
 
-### Coolify Deployment on Oracle Cloud
+## 🔧 API Reference
+
+### Admin API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/admin/instances` | POST | Create a new WhatsApp instance |
+| `/api/admin/instances` | GET | List all instances |
+| `/api/admin/instances/:instanceId` | GET | Get instance details |
+| `/api/admin/instances/:instanceId` | PUT | Update instance configuration |
+| `/api/admin/instances/:instanceId` | DELETE | Delete an instance |
+| `/api/admin/instances/:instanceId/restart` | POST | Restart an instance |
+
+### Public API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/instances/:instanceId/qr` | GET | Get QR code for authentication |
+| `/api/webhook/:instanceId` | POST | Send a message via the instance |
+| `/health` | GET | Check server health |
+| `/version` | GET | Get server version information |
+
+## n8n Integration
+
+### Setting up the n8n Workflow
+
+1. In n8n, create a new workflow with a webhook node
+2. Configure the webhook path to match what you specified in the instance configuration
+3. Add your AI processing nodes (OpenAI, logic, etc.)
+4. Return responses in this format:
+   ```json
+   {
+     "output": "The response text to send to WhatsApp"
+   }
+   ```
+
+### Testing the Integration
+
+Send a message to one of your allowed WhatsApp users or groups. The connector will:
+1. Receive the message
+2. Forward it to the corresponding n8n workflow
+3. Send the AI-generated response back to WhatsApp
+
+## Coolify Deployment on Oracle Cloud
 
 1. Set up your Oracle Cloud instance with Coolify
-2. Import this project into Coolify
-3. Configure the environment variables
-4. Deploy using the Coolify dashboard
+2. Import this project into Coolify with these settings:
+   - Port: 3030
+   - Environment variables: Copy from your `.env` file
+   - Persistent storage for:
+     - `/app/data` - Instance configurations and conversations
+     - `/app/sessions` - WhatsApp session data
+     - `/app/logs` - Log files
 
-## 🔧 Architecture
-
-This solution uses a "thin client, smart server" architecture:
-
-1. **WhatsApp Client (This Repository)**
-   - Handles WhatsApp connectivity
-   - Manages user sessions and authorization
-   - Maintains conversation history
-   - Forwards messages to n8n for processing
-
-2. **n8n Instance (Your Oracle Cloud Server)**
-   - Handles all AI processing with the AI Agent
-   - Stores credentials securely
-   - Performs web searches and calculations
-   - Returns formatted responses
-
-This approach offers several advantages:
-- Your API keys remain secure in n8n, not in the WhatsApp client
-- n8n's visual workflow builder makes it easy to customize AI behavior
-- Tool calling capabilities are handled by n8n's AI Agent node
-- You can modify the AI's behavior without redeploying the WhatsApp client
-
-## 📱 WhatsApp Integration
-
-This bot uses `whatsapp-web.js` to connect to WhatsApp. The first time you run it, you'll need to scan a QR code with your WhatsApp phone.
-
-### Group Chat Usage
-
-The bot can be used in group chats in two ways:
-1. Mention the bot's number
-2. Use a command prefix (default: !bot)
-
-Example: `!bot What's the weather in London?`
+3. Deploy the application
 
 ## ⚠️ Disclaimer
 
 This is an unofficial method for connecting to WhatsApp. WhatsApp may block numbers that misuse automation. Use responsibly and adhere to WhatsApp's terms of service.
 
-## 🛠️ Troubleshooting
-
-- **QR Code Not Showing**: Ensure your terminal supports QR code display or use the web interface
-- **Connection Issues**: Check your network and firewall settings
-- **Authentication Errors**: Verify your API keys and credentials
-- **n8n Connection Problems**: Ensure your n8n instance is running and accessible
-- **Container Failures**: Check the Docker logs for detailed error information
-
 ## 📝 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License.
 
 ## 🤝 Contributing
 
