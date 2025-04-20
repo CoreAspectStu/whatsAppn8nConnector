@@ -32,7 +32,7 @@ ENV NODE_ENV=production
 COPY package*.json ./
 
 # Install dependencies
-RUN npm ci --only=production
+RUN npm install --production
 
 # Copy application code
 COPY . .
@@ -44,11 +44,11 @@ RUN mkdir -p /app/data /app/sessions /app/logs
 VOLUME ["/app/data", "/app/sessions", "/app/logs"]
 
 # Expose port
-EXPOSE 3000
+EXPOSE 3030
 
 # Define healthcheck
 HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
-  CMD node -e "const http = require('http'); const options = { hostname: 'localhost', port: 3000, path: '/health', timeout: 2000 }; const req = http.get(options, (res) => { console.log(res.statusCode); process.exit(res.statusCode === 200 ? 0 : 1); }); req.on('error', (err) => { console.error(err); process.exit(1); });"
+  CMD node -e "const http = require('http'); const options = { hostname: 'localhost', port: 3030, path: '/health', timeout: 2000 }; const req = http.get(options, (res) => { console.log(res.statusCode); process.exit(res.statusCode === 200 ? 0 : 1); }); req.on('error', (err) => { console.error(err); process.exit(1); });"
 
 # Start the application
 CMD ["node", "src/index.js"]
