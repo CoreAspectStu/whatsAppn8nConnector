@@ -1,0 +1,346 @@
+{
+  "name": "Enhanced WhatsApp AI Bot with Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-ai-bot",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "1a9ce6fe-576c-4f34-9acd-8d1d45313802",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        300
+      ],
+      "webhookId": "cfa0ef6d-8d21-4218-b09a-6e3bd95d1f92"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse the incoming data\nconst incomingData = $input.item.json.body || $input.item.json;\n\n// Extract message details\nconst message = incomingData.message;\nconst sender = incomingData.sender;\nconst conversation = incomingData.conversation || { messages: [] };\nconst timestamp = incomingData.timestamp;\nconst isGroup = incomingData.isGroup || false;\n\n// Format the user info for better context\nlet userInfo = '';\nif (sender && sender.name) {\n  userInfo = `User: ${sender.name}`;\n  if (sender.id) {\n    userInfo += ` (${sender.id})`;\n  }\n  if (isGroup && sender.inGroup) {\n    userInfo += ` in group ${sender.inGroup}`;\n  }\n}\n\n// Get the last few messages for context (limited to recent history)\nconst messageHistory = [];\nif (conversation && Array.isArray(conversation.messages)) {\n  // Get the last several messages for context\n  const recentMessages = conversation.messages.slice(-8); // Adjust number as needed\n  \n  for (const msg of recentMessages) {\n    // Add the message with proper formatting\n    if (msg.role === 'user') {\n      messageHistory.push(`User: ${msg.content}`);\n    } else if (msg.role === 'assistant') {\n      messageHistory.push(`Assistant: ${msg.content}`);\n    }\n  }\n}\n\n// Prepare data for the AI Agent\nconst outputItem = {\n  json: {\n    message: message,\n    userInfo: userInfo,\n    context: messageHistory.join('\\n'),\n    timestamp: timestamp,\n    isGroup: isGroup,\n    rawData: incomingData  // Keep the raw data for advanced processing if needed\n  }\n};\n\n// Return the prepared data\nreturn outputItem;"
+      },
+      "id": "10a4d0dd-e7ea-4abb-9b5c-b9d08ef07c8d",
+      "name": "Prepare Data for AI",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "agent": "conversationalAgent",
+        "promptType": "define",
+        "text": "={{ $json.message }}",
+        "options": {
+          "systemMessage": "You are a helpful AI assistant operating through WhatsApp integration. You are friendly, concise, and informative.\n\nCONTEXT INFORMATION:\nUser: {{ $json.userInfo }}\nRecent conversation history:\n{{ $json.context }}\n\nWhen responding, please follow these guidelines:\n\n1. Keep responses concise and mobile-friendly (under 500 characters when possible)\n2. Format text for WhatsApp using *bold* and _italic_ where appropriate\n3. Use emojis occasionally but don't overuse them\n4. Be helpful, accurate, and admit when you don't know something\n5. Maintain a conversational but professional tone\n6. If searching for information, summarize what you find clearly\n7. If performing calculations, show your work in a clear, step-by-step format\n8. When providing links, keep them clean and accessible\n\nProvide the best, most accurate and helpful response possible to the user's query."
+        }
+      },
+      "id": "3ba4df87-2c1e-4a55-9e19-62fd7e3da5b1",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        120,
+        300
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "7e1a2cb8-0f4a-4b5c-b90d-58e3c06b05dc",
+      "name": "Web Search",
+      "type": "@n8n/n8n-nodes-langchain.toolWebBrowser",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        420
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "6ba4912f-9a56-4a0f-8e85-a2c87d4f9d3a",
+      "name": "Calculator",
+      "type": "@n8n/n8n-nodes-langchain.toolCalculator",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        540
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "gpt-4o"
+        },
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "5d93e1cb-8a6c-4a9c-b327-fe70a4bd0f8b",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -100,
+        180
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "1",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Webhook').item.json.body.sender.id || $('Webhook').item.json.sender.id }}"
+      },
+      "id": "8fb3a0de-7c54-4c78-b3a1-4f1a6ed5a927",
+      "name": "Window Buffer Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        -100,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Get the AI response\nconst aiResponse = $input.item.json.text || $input.item.json.result || \"I'm sorry, I couldn't generate a response.\";\n\n// Format the response for WhatsApp\nlet formattedResponse = aiResponse;\n\n// Check if the response is too long and truncate if necessary\nconst MAX_LENGTH = 4000; // WhatsApp has character limits\nif (formattedResponse.length > MAX_LENGTH) {\n  formattedResponse = formattedResponse.substring(0, MAX_LENGTH - 100) + \"\\n\\n[Message truncated due to length limitations]\";\n}\n\n// Prepare the output structure expected by the WhatsApp bot\nconst outputItem = {\n  json: {\n    output: formattedResponse,\n    timestamp: new Date().toISOString(),\n    success: true,\n    metadata: {\n      model: $input.item.json.model || 'AI Agent',\n      source: 'n8n-ai-agent',\n      processing_time: new Date().getTime() - new Date($input.item.json.timestamp || Date.now()).getTime()\n    }\n  }\n};\n\nreturn outputItem;"
+      },
+      "id": "9cf4c08d-da3c-4f03-a7ff-cc6986c28328",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        340,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "ac1be09d-71be-4427-ab25-0e6e30cf8436",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        560,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "8daf2a40-63b7-4b8a-b71e-d11bf3a9b626",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -320,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "status",
+              "value": "ok"
+            },
+            {
+              "name": "message",
+              "value": "WhatsApp AI Bot is running properly"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ $now.toISOString() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e3c75a58-fb3a-4a30-b7f3-7d8b9c2a9a88",
+      "name": "Set Health Status",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        -100,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "status": "={{ $json.status === 'ok' ? 'success' : 'error' }}",
+        "message": "={{ $json.message }}",
+        "options": {
+          "timestamp": "={{ $json.timestamp }}"
+        }
+      },
+      "id": "1ec3edb2-cf59-4a84-8c3d-b3d50b8e9a1f",
+      "name": "Health Check Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        120,
+        -60
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Prepare Data for AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Data for AI": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Web Search": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculator": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Window Buffer Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set Health Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Health Status": {
+      "main": [
+        [
+          {
+            "node": "Health Check Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "pinData": {},
+  "versionId": "9a7a7e9c-72c9-4d99-b05d-8f53e462913e",
+  "tags": [
+    {
+      "name": "bot"
+    },
+    {
+      "name": "whatsapp"
+    },
+    {
+      "name": "ai"
+    }
+  ]
+}

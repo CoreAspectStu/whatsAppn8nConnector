@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  whatsapp-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: whatsapp-ai-bot
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - LOG_LEVEL=info
+      - ALLOWED_USERS=${ALLOWED_USERS}
+      - ALLOWED_GROUPS=${ALLOWED_GROUPS}
+      - N8N_BASE_URL=${N8N_BASE_URL}
+      - N8N_API_KEY=${N8N_API_KEY}
+      - N8N_WEBHOOK_PATH=${N8N_WEBHOOK_PATH}
+      - AI_PROVIDER=${AI_PROVIDER}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL}
+      # Add other environment variables as needed
+    volumes:
+      - ./data:/app/data
+      - ./sessions:/app/sessions
+      - ./logs:/app/logs
+    networks:
+      - bot-network
+    depends_on:
+      - sqlite-db  # only needed if using SQLite
+
+  sqlite-db:
+    image: alpine:latest
+    container_name: whatsapp-bot-db
+    volumes:
+      - ./data:/data
+    command: sh -c "mkdir -p /data && touch /data/conversations.db && tail -f /dev/null"
+    restart: unless-stopped
+    networks:
+      - bot-network
+
+  # Uncomment this if you want to run n8n in the same docker-compose
+  # n8n:
+  #   image: n8nio/n8n:latest
+  #   container_name: n8n
+  #   restart: unless-stopped
+  #   ports:
+  #     - "5678:5678"
+  #   environment:
+  #     - N8N_HOST=n8n
+  #     - N8N_PORT=5678
+  #     - N8N_PROTOCOL=http
+  #     - NODE_ENV=production
+  #     - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+  #     - DB_TYPE=sqlite
+  #     - DB_SQLITE_PATH=/home/node/.n8n/database.sqlite
+  #     - WEBHOOK_URL=http://n8n:5678/
+  #     - OPENAI_API_KEY=${OPENAI_API_KEY}
+  #   volumes:
+  #     - ./n8n-data:/home/node/.n8n
+  #   networks:
+  #     - bot-network
+
+networks:
+  bot-network:
+    driver: bridge

@@ -1,0 +1,151 @@
+{
+  "name": "WhatsApp Bot Analytics",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bot-analytics",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "f34a7e9c-75c9-4d99-b05d-8f53e462913e",
+      "name": "Analytics Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -180,
+        300
+      ],
+      "webhookId": "b7a0ef6d-8d21-4218-b09a-6e3bd95d1f92"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract analytics data\nconst payload = $input.item.json.body || $input.item.json;\n\n// Add a timestamp if not present\nif (!payload.timestamp) {\n  payload.timestamp = new Date().toISOString();\n}\n\n// Add additional context data\npayload.source = 'whatsapp-bot';\npayload.environment = process.env.NODE_ENV || 'production';\n\n// Return the data for further processing\nreturn {json: payload};"
+      },
+      "id": "10a4d0dd-e7ea-4abb-9b5c-b9d08ef1234e",
+      "name": "Process Analytics Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        60,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "ANALYTICS_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Bot Analytics"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "A1:Z1000",
+          "mode": "list",
+          "cachedResultName": "Analytics"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "userId": "={{$json[\"userId\"]}}",
+            "timestamp": "={{$json[\"timestamp\"]}}",
+            "userMessageLength": "={{$json[\"userMessageLength\"]}}",
+            "botResponseLength": "={{$json[\"botResponseLength\"]}}",
+            "responseTime": "={{$json[\"responseTime\"]}}",
+            "environment": "={{$json[\"environment\"]}}"
+          }
+        },
+        "options": {}
+      },
+      "id": "b2d9b2a7-cf2f-4a65-9e01-c98ae2b6a48e",
+      "name": "Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        320,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "abcYw5lhiuRSvPIQ",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": true, \"message\": \"Analytics data received\" }",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "dc1be09d-71be-4427-ab25-0e6e30cf8436",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        580,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Analytics Webhook": {
+      "main": [
+        [
+          {
+            "node": "Process Analytics Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Analytics Data": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "pinData": {},
+  "versionId": "7b8a9f0c-82d9-4e99-b15d-9f63e562913e",
+  "tags": [
+    {
+      "name": "analytics"
+    },
+    {
+      "name": "whatsapp"
+    },
+    {
+      "name": "bot"
+    }
+  ]
+}

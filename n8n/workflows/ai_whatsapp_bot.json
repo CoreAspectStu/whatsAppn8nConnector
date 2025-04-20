@@ -1,0 +1,180 @@
+{
+  "name": "Enhanced WhatsApp AI Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-ai-bot",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "1a9ce6fe-576c-4f34-9acd-8d1d45313802",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -180,
+        300
+      ],
+      "webhookId": "cfa0ef6d-8d21-4218-b09a-6e3bd95d1f92"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse the incoming data\nconst incomingData = $input.item.json.body || $input.item.json;\n\n// Extract message details\nconst message = incomingData.message;\nconst sender = incomingData.sender;\nconst conversation = incomingData.conversation || { messages: [] };\nconst timestamp = incomingData.timestamp;\nconst isGroup = incomingData.isGroup || false;\n\n// Prepare conversation history in the right format for the AI\nlet conversationHistory = [];\n\n// Process existing conversation if available\nif (conversation && Array.isArray(conversation.messages)) {\n  // Get the last few messages (limit to control context size)\n  const recentMessages = conversation.messages.slice(-5);\n  \n  // Format them for the AI\n  conversationHistory = recentMessages.map(msg => {\n    return {\n      role: msg.role,\n      content: msg.content\n    };\n  });\n}\n\n// Add the current message if not already included\nconversationHistory.push({\n  role: 'user',\n  content: message\n});\n\n// Prepare data for the AI\nconst outputItem = {\n  message,\n  sender,\n  conversationHistory,\n  timestamp,\n  isGroup,\n  json: {\n    messages: conversationHistory\n  }\n};\n\n// Return the prepared data\nreturn {json: outputItem};"
+      },
+      "id": "10a4d0dd-e7ea-4abb-9b5c-b9d08ef07c8d",
+      "name": "Prepare Data for AI",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        60,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4-turbo",
+          "mode": "list",
+          "cachedResultName": "GPT-4 Turbo (gpt-4-turbo)"
+        },
+        "prompt": {
+          "promptType": "messages",
+          "messages": {
+            "values": [
+              {
+                "role": "system",
+                "content": "You are a helpful assistant integrated with WhatsApp. Your personality is friendly, concise, and informative. \n\nWhen responding, please consider the following guidelines:\n\n1. Respect user privacy and do not ask for personal information.\n2. Provide accurate information and admit when you don't know something.\n3. Keep responses clear and concise, as users are on a mobile platform.\n4. Use emojis occasionally to add warmth, but don't overuse them.\n5. Format text appropriately for WhatsApp - use asterisks for *bold* and underscores for _italic_.\n6. For lists, use simple numbering or bullets with line breaks.\n7. When providing links, keep them clean and accessible.\n8. Don't generate excessively long responses - aim for brevity.\n\nCurrently, you can't browse the web or access files directly, but you can help with information, answer questions, generate ideas, and engage in thoughtful conversations.\n\nAdapt your tone and approach based on the user's needs."
+              },
+              {
+                "role": "=item.json.role !== undefined ? item.json.role : null",
+                "content": "=item.json.content !== undefined ? item.json.content : null",
+                "messageIndex": 0,
+                "type": "messageTemplate"
+              }
+            ],
+            "messageElements": "={{$json.json.messages}}"
+          }
+        },
+        "options": {
+          "maxTokens": 1000,
+          "temperature": 0.7,
+          "presencePenalty": 0,
+          "frequencyPenalty": 0
+        }
+      },
+      "id": "02d9b2a7-bf2f-4a65-9e01-c98ae2b6a48e",
+      "name": "OpenAI",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [
+        320,
+        300
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "hb9Yw5lhiuRSvPIQ",
+          "name": "OpenAI API account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Get the AI response\nconst aiResponse = $input.item.json.text || $input.item.json.message || \"I'm sorry, I couldn't generate a response.\";\n\n// Prepare the output structure expected by the WhatsApp bot\nconst outputItem = {\n  json: {\n    output: aiResponse,\n    timestamp: new Date().toISOString(),\n    success: true,\n    metadata: {\n      model: $input.item.json.model || 'unknown',\n      tokens: $input.item.json.usage?.total_tokens || 0,\n      processing_time: $input.item.json.processing_time || 0\n    }\n  }\n};\n\nreturn outputItem;"
+      },
+      "id": "9cf4c08d-da3c-4f03-a7ff-cc6986c28328",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        580,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "ac1be09d-71be-4427-ab25-0e6e30cf8436",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        800,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Prepare Data for AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Data for AI": {
+      "main": [
+        [
+          {
+            "node": "OpenAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "pinData": {},
+  "versionId": "9a7a7e9c-72c9-4d99-b05d-8f53e462913e",
+  "tags": [
+    {
+      "name": "bot"
+    },
+    {
+      "name": "whatsapp"
+    },
+    {
+      "name": "ai"
+    }
+  ]
+}
